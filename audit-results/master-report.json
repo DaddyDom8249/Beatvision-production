@@ -1,0 +1,166 @@
+{
+  "generated_at": "2026-09-25T01:45:01.229Z",
+  "credits_used": 0,
+  "repository": "/home/ubuntu/work/BeatVision-main",
+  "canonical_arena_worker": "/home/ubuntu/work/BeatVision-main/worker",
+  "checks": [
+    {
+      "name": "repository",
+      "ok": true,
+      "detail": "package.json present"
+    },
+    {
+      "name": "canonical Arena entry",
+      "ok": true,
+      "detail": "validated Arena entrypoint present"
+    },
+    {
+      "name": "canonical Arena config",
+      "ok": true,
+      "detail": "Arena deployment config present"
+    },
+    {
+      "name": "timeline contract",
+      "ok": true,
+      "detail": "timeline contract lives with Arena"
+    },
+    {
+      "name": "timeline contract tests",
+      "ok": true,
+      "detail": "timeline contract regression tests present"
+    },
+    {
+      "name": "animation jobs",
+      "ok": true,
+      "detail": "durable motion jobs present"
+    },
+    {
+      "name": "visual beat engine",
+      "ok": true,
+      "detail": "duration-aware visual beat engine present"
+    },
+    {
+      "name": "credit-safe defaults",
+      "ok": true,
+      "detail": "safe mode documented"
+    },
+    {
+      "name": "obsolete image-only worker removed",
+      "ok": true,
+      "detail": "no parallel Cloudflare image worker"
+    },
+    {
+      "name": "generation auth helper",
+      "ok": true,
+      "detail": "shared authenticated-user enforcement present"
+    },
+    {
+      "name": "generation project authorization",
+      "ok": true,
+      "detail": "language generation is bound to the signed-in project owner"
+    },
+    {
+      "name": "generation provider authority",
+      "ok": true,
+      "detail": "no direct legacy Gemini provider path"
+    },
+    {
+      "name": "Arena bridge authentication",
+      "ok": true,
+      "detail": "Arena bridge requires an authenticated user"
+    },
+    {
+      "name": "Arena production UI",
+      "ok": true,
+      "detail": "project UI identifies Arena as execution authority"
+    },
+    {
+      "name": "Arena motion execution",
+      "ok": true,
+      "detail": "motion uses Arena jobs"
+    },
+    {
+      "name": "Arena final assembly",
+      "ok": true,
+      "detail": "final assembly uses Arena"
+    },
+    {
+      "name": "no hard-coded Supabase fallback",
+      "ok": true,
+      "detail": "Supabase URL/key come from environment"
+    },
+    {
+      "name": "obsolete provider settings route removed",
+      "ok": true,
+      "detail": "dead global provider settings route removed"
+    },
+    {
+      "name": "worker test src/pipeline-contract.test.ts",
+      "ok": true,
+      "detail": "test present"
+    },
+    {
+      "name": "worker test src/storyboard-validator.test.ts",
+      "ok": true,
+      "detail": "test present"
+    },
+    {
+      "name": "worker test src/render-integrity.test.ts",
+      "ok": true,
+      "detail": "test present"
+    },
+    {
+      "name": "worker test src/composition-model.test.ts",
+      "ok": true,
+      "detail": "test present"
+    },
+    {
+      "name": "worker test src/visual-reuse-detector.test.ts",
+      "ok": true,
+      "detail": "test present"
+    },
+    {
+      "name": "worker test src/musical-structure.test.ts",
+      "ok": true,
+      "detail": "test present"
+    },
+    {
+      "name": "worker test src/scene-splitting.test.ts",
+      "ok": true,
+      "detail": "test present"
+    },
+    {
+      "name": "frontend typecheck",
+      "ok": true,
+      "detail": "TypeScript check"
+    },
+    {
+      "name": "frontend build",
+      "ok": true,
+      "detail": "production build"
+    },
+    {
+      "name": "deterministic e2e",
+      "ok": true,
+      "detail": "deterministic end-to-end suite"
+    },
+    {
+      "name": "local render contract",
+      "ok": true,
+      "detail": "local media/timeline integrity suite"
+    },
+    {
+      "name": "security audit",
+      "ok": true,
+      "detail": "Arena authentication and CORS audit"
+    },
+    {
+      "name": "Arena worker tests",
+      "ok": true,
+      "detail": "Arena regression suite"
+    }
+  ],
+  "warnings": [],
+  "failures": [],
+  "status": "PASS"
+}

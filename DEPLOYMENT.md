@@ -58,33 +58,16 @@ A release is not considered production-ready until all of these pass in the depl
 - mobile browser smoke test
 
 
-## Production remediation
+## Database migrations
 
-The current media pipeline requires the remote D1 schema migration in `migrations/0002-production-remediation.sql`.
+The repository currently includes the canonical `schema.sql`. Cloudflare's D1 documentation supports applying schema SQL remotely with Wrangler, while versioned migrations should be used as the project grows. Do not reference removed legacy migrations in production runbooks.
 
-Run this from a trusted machine with the Cloudflare account authenticated:
+For the current ground-zero deployment, apply the canonical schema once to the remote database before the first production workload:
 
-```bash
-npx wrangler d1 execute beatvision --remote --file=./migrations/0002-production-remediation.sql
-```
+    npx wrangler d1 execute beatvision --remote --file=./schema.sql
 
-Then verify the schema:
+After the database is established, future schema changes should be added as numbered files under `migrations/` and applied in order. Cloudflare documents D1 migrations as versioned SQL files tracked in the repository.
 
-```bash
-npx wrangler d1 execute beatvision --remote --command="PRAGMA table_info(projects)"
-npx wrangler d1 execute beatvision --remote --command="PRAGMA table_info(scenes)"
-```
+## Current release gate
 
-The Worker uses the documented Shotstack production API bases:
-
-- Ingest: `https://api.shotstack.io/ingest/v1`
-- Edit: `https://api.shotstack.io/edit/v1`
-
-Shotstack ingest reports the uploaded audio duration, which BeatVision stores and uses to build the storyboard timeline. The renderer refuses to render until every generated scene has an image and the song audio is ready.
-
-The only external provider secrets required by the Worker are:
-
-- `PIXAZO_API_KEY`
-- `SHOTSTACK_API_KEY`
-
-No provider API key is required for the language engine because it uses the Cloudflare Workers AI binding.
+The repository CI verifies TypeScript, tests, and a Wrangler deployment dry-run. Cloudflare Workers Builds can automatically deploy the connected Git repository on pushes to the configured production branch. A real production release still requires the Cloudflare deployment and provider credentials to be present.

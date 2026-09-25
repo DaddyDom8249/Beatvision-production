@@ -1,13 +1,18 @@
 {
-  "name":"beatvision",
-  "private":true,
-  "version":"0.1.0",
-  "type":"module",
-  "scripts":{"typecheck":"tsc --noEmit","test":"vitest run","deploy":"wrangler deploy"},
-  "devDependencies":{
-    "@cloudflare/workers-types":"5.20260925.1",
-    "typescript":"5.9.3",
-    "vitest":"4.1.11",
-    "wrangler":"4.139.0"
+  "name": "beatvision",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260925.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "wrangler": "4.139.0",
+    "@types/node": "26.6.2"
   }
 }

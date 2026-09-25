@@ -1,6 +1,6 @@
 {
   "$schema":"node_modules/wrangler/config-schema.json",
-  "name":"beatvision",
+  "name":"beatvision-production",
   "main":"src/index.ts",
   "compatibility_date":"2026-09-25",
   "workers_dev":true,

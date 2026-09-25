@@ -1,7 +1,15 @@
 # BeatVision
 
-**Every Song Has a World. BeatVision Reveals It.**
+Every Song Has a World. BeatVision Reveals It.
 
-Ground-zero rebuild. One Cloudflare Worker, D1 and Workers AI, Pixazo, and Shotstack. The only external provider secrets are `PIXAZO_API_KEY` and `SHOTSTACK_API_KEY`. No Gemini, OpenAI, Supabase, Firebase, external LLM gateway, second Worker, or provider bridge.
+Ground-zero architecture: one Cloudflare Worker, D1, Workers AI, Pixazo and Shotstack. No Gemini, OpenAI API, Supabase, Firebase or Arena gateway.
 
-Provider keys never reach the browser. AI output is schema-validated before persistence. `song_summary` is mandatory. Failed provider calls are never reported as success.
+First vertical slice: account -> project -> song upload -> Visual World Report -> Pixazo hero image -> Shotstack render.
+
+Provider secrets are server-side only:
+- PIXAZO_API_KEY
+- SHOTSTACK_API_KEY
+
+Run npm install, npm run typecheck, npm test, then npx wrangler deploy --dry-run.
+
+Cloudflare Workers AI supports model execution through an AI binding, D1 provides native serverless SQL, Shotstack provides ingest/edit APIs, and Pixazo documents the Flux 1 Schnell endpoint used here.

@@ -358,6 +358,14 @@ async function handle(request:Request,env:Env):Promise<Response> {
 
 export default {
   async fetch(request:Request,env:Env,ctx:ExecutionContext) {
+    // Deployment probe: deliberately bypasses all bindings, auth, D1, AI and providers.
+    // If this route fails, the problem is Worker deployment/routing rather than application logic.
+    if (new URL(request.url).pathname === "/api/health" && request.method === "GET") {
+      return new Response(JSON.stringify({ok:true,service:"beatvision",build:"2026-09-24-ground-zero-probe"}), {
+        status:200,
+        headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-beatvision-build":"2026-09-24-ground-zero-probe"}
+      });
+    }
     try {
       const response=await handle(request,env);
       if(response.status===404 && request.method==="GET" && !new URL(request.url).pathname.startsWith("/api/")) return env.ASSETS.fetch(request);

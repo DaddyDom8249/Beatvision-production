@@ -25,6 +25,15 @@ type WorldReport = {
   symbolic_motifs: string[];
   continuity_rules: string[];
   scene_count: number;
+  style_bible: {
+    palette: string[];
+    lighting: string;
+    atmosphere: string;
+    cinematography: string;
+    character_rules: string[];
+    environment_rules: string[];
+    continuity_rules: string[];
+  };
 };
 
 const SESSION_COOKIE = "bv_session";
@@ -32,6 +41,9 @@ const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_TEXT = 30000;
 const MAX_AUDIO = 25 * 1024 * 1024;
 const AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+const BUILD = "2026-09-25-production-remediation-1";
+const SHOTSTACK_INGEST_BASE = "https://api.shotstack.io/ingest/v1";
+const SHOTSTACK_EDIT_BASE = "https://api.shotstack.io/edit/v1";
 
 class HttpError extends Error {
   status: number;
@@ -98,6 +110,8 @@ async function requireUser(request:Request,env:Env) {
   return user;
 }
 async function body(request:Request) {
+  const contentLength=Number(request.headers.get("content-length")||0);
+  if(contentLength>2_000_000)throw new HttpError("Request body is too large",413);
   const value=await request.json().catch(()=>null);
   if(!value||typeof value!=="object")throw new HttpError("Invalid JSON body",400);
   return value as Record<string,unknown>;
@@ -112,7 +126,7 @@ function originAllowed(request:Request) {
   return !origin || origin===new URL(request.url).origin;
 }
 
-function validateWorld(value:any):WorldReport {
+export function validateWorld(value:any):WorldReport {
   const required=["song_summary","emotional_core","visual_arc","visual_language","cinematography","lighting"];
   for(const key of required) {
     if(typeof value?.[key]!=="string" || !value[key].trim()) throw new HttpError("Visual World Report missing required field: "+key,502);
@@ -121,6 +135,16 @@ function validateWorld(value:any):WorldReport {
   if(!Array.isArray(value.environments)||value.environments.length<1)throw new HttpError("Visual World Report has no environments",502);
   if(!Array.isArray(value.characters))throw new HttpError("Visual World Report has invalid characters",502);
   if(!Array.isArray(value.symbolic_motifs)||!Array.isArray(value.continuity_rules))throw new HttpError("Visual World Report has incomplete continuity data",502);
+  const bible=value.style_bible||{};
+  const style_bible={
+    palette:Array.isArray(bible.palette)?bible.palette.slice(0,8).map(String):value.color_palette.slice(0,8).map(String),
+    lighting:typeof bible.lighting==="string"&&bible.lighting.trim()?bible.lighting.trim():value.lighting.trim(),
+    atmosphere:typeof bible.atmosphere==="string"?bible.atmosphere.trim():"",
+    cinematography:typeof bible.cinematography==="string"&&bible.cinematography.trim()?bible.cinematography.trim():value.cinematography.trim(),
+    character_rules:Array.isArray(bible.character_rules)?bible.character_rules.slice(0,16).map(String):[],
+    environment_rules:Array.isArray(bible.environment_rules)?bible.environment_rules.slice(0,16).map(String):[],
+    continuity_rules:Array.isArray(bible.continuity_rules)?bible.continuity_rules.slice(0,16).map(String):value.continuity_rules.slice(0,16).map(String)
+  };
   const sceneCount=Math.min(24,Math.max(4,Number(value.scene_count)||8));
   return {
     song_summary:value.song_summary.trim(),
@@ -134,7 +158,8 @@ function validateWorld(value:any):WorldReport {
     characters:value.characters.slice(0,12).map((c:any)=>({name:String(c?.name||"Lead"),role:String(c?.role||""),visual_identity:String(c?.visual_identity||"")})),
     symbolic_motifs:value.symbolic_motifs.slice(0,12).map(String),
     continuity_rules:value.continuity_rules.slice(0,16).map(String),
-    scene_count:sceneCount
+    scene_count:sceneCount,
+    style_bible
   };
 }
 
@@ -142,7 +167,8 @@ async function worldReport(env:Env,project:any):Promise<WorldReport> {
   const prompt =
     "You are BeatVision's Visual World Director. Create a production-ready visual bible from a song brief. " +
     "Return ONLY a JSON object. Never return markdown. Never reproduce copyrighted lyrics beyond what the user supplied. " +
-    "Required keys: song_summary, emotional_core, visual_arc, visual_language, cinematography, color_palette, lighting, environments, characters, symbolic_motifs, continuity_rules, scene_count. " +
+    "Required keys: song_summary, emotional_core, visual_arc, visual_language, cinematography, color_palette, lighting, environments, characters, symbolic_motifs, continuity_rules, scene_count, style_bible. " +
+    "style_bible must contain palette, lighting, atmosphere, cinematography, character_rules, environment_rules, continuity_rules. " +
     "characters must be an array of objects with name, role, visual_identity. scene_count must be 4-24. " +
     "Song title: "+project.title+"\nArtist: "+project.artist+"\nLyrics/context: "+project.lyrics+
     "\nCreative direction: "+project.creative_direction+"\nNotes: "+project.notes;
@@ -159,9 +185,10 @@ async function worldReport(env:Env,project:any):Promise<WorldReport> {
   return validateWorld(parsed);
 }
 
-function scenesFromWorld(report:WorldReport) {
+export function scenesFromWorld(report:WorldReport,durationSeconds:number) {
+  if(!Number.isFinite(durationSeconds)||durationSeconds<=0)throw new HttpError("A valid audio duration is required",400);
   const count=report.scene_count;
-  const duration=30/count;
+  const duration=durationSeconds/count;
   return Array.from({length:count},(_,i)=>{
     const environment=report.environments[i%report.environments.length];
     const character=report.characters.length?report.characters[i%report.characters.length]:{name:"Lead",visual_identity:"consistent lead character"};
@@ -169,7 +196,8 @@ function scenesFromWorld(report:WorldReport) {
       id:id(),
       scene_index:i,
       start_seconds:Number((i*duration).toFixed(3)),
-      duration_seconds:Number(duration.toFixed(3)),
+      duration_seconds:Number((i===count-1?durationSeconds-i*duration:duration).toFixed(3)),
+      motion_effect:["zoomIn","zoomOut","slideLeft","slideRight"][i%4],
       prompt:
         "Cinematic music-video frame, scene "+(i+1)+". Environment: "+environment+
         ". Character: "+character.name+", "+character.visual_identity+
@@ -177,6 +205,8 @@ function scenesFromWorld(report:WorldReport) {
         ". Cinematography: "+report.cinematography+
         ". Lighting: "+report.lighting+
         ". Color palette: "+report.color_palette.join(", ")+
+        ". Style Bible palette: "+report.style_bible.palette.join(", ")+
+        ". Style Bible atmosphere: "+report.style_bible.atmosphere+
         ". Symbolic motifs: "+report.symbolic_motifs.slice(0,4).join(", ")+
         ". Preserve character identity, wardrobe, environment logic and continuity."
     };
@@ -196,13 +226,17 @@ async function pixazoGenerate(env:Env,prompt:string) {
   throw new HttpError("Pixazo returned no completed image",502);
 }
 
-async function shotstack(env:Env,path:string,init:RequestInit={}) {
-  const response=await fetch("https://api.shotstack.io/v1"+path,{
+async function shotstack(env:Env,path:string,init:RequestInit={},kind:"ingest"|"edit"="edit") {
+  const base=kind==="ingest"?SHOTSTACK_INGEST_BASE:SHOTSTACK_EDIT_BASE;
+  const response=await fetch(base+path,{
     ...init,
     headers:{"Accept":"application/json","Content-Type":"application/json","x-api-key":env.SHOTSTACK_API_KEY,...(init.headers||{})}
   });
   const data:any=await response.json().catch(()=>null);
-  if(!response.ok)throw new HttpError("Shotstack request failed",502);
+  if(!response.ok) {
+    console.error({provider:"shotstack",kind,path,status:response.status,body:typeof data==="object"?JSON.stringify(data).slice(0,2000):String(data||"")});
+    throw new HttpError("Shotstack request failed",502);
+  }
   return data;
 }
 
@@ -210,7 +244,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
   if(!originAllowed(request))return fail("Invalid origin",403);
   const url=new URL(request.url), path=url.pathname, method=request.method;
 
-  if(path==="/api/health")return json({ok:true,service:"beatvision",version:"1.0.0",language:"cloudflare-workers-ai",image:"pixazo",video:"shotstack"});
+  if(path==="/api/health")return json({ok:true,service:"beatvision",build:BUILD,language:"cloudflare-workers-ai",image:"pixazo",video:"shotstack"});
   if(path==="/api/me")return json({user:await currentUser(request,env)});
 
   if(path==="/api/auth/register"&&method==="POST") {
@@ -220,8 +254,10 @@ async function handle(request:Request,env:Env):Promise<Response> {
     const exists=await env.DB.prepare("SELECT id FROM users WHERE username=?").bind(username).first();
     if(exists)return fail("Username already exists",409);
     const p=await makePassword(password), uid=id(), sid=id(), t=now();
-    await env.DB.prepare("INSERT INTO users VALUES(?,?,?,?,?)").bind(uid,username,p.hash,p.salt,t).run();
-    await env.DB.prepare("INSERT INTO sessions VALUES(?,?,?,?)").bind(sid,uid,t+SESSION_MS,t).run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users VALUES(?,?,?,?,?)").bind(uid,username,p.hash,p.salt,t),
+      env.DB.prepare("INSERT INTO sessions VALUES(?,?,?,?)").bind(sid,uid,t+SESSION_MS,t)
+    ]);
     return json({success:true,user:{id:uid,username}},201,{"set-cookie":cookie(SESSION_COOKIE,sid,SESSION_MS/1000,new URL(request.url).protocol==="https:")});
   }
 
@@ -268,14 +304,19 @@ async function handle(request:Request,env:Env):Promise<Response> {
 
   if(sub==="world"&&method==="POST") {
     if(!(await env.WORLD_RL.limit({key:user.id})).success) return fail("World generation rate limit exceeded",429);
+    if(!project.audio_duration||Number(project.audio_duration)<=0)throw new HttpError("Upload and complete the song audio before revealing the world",400);
     const report=await worldReport(env,project);
-    const scenes=scenesFromWorld(report), t=now();
-    await env.DB.prepare("INSERT OR REPLACE INTO world_reports VALUES(?,?,?,?,?)").bind(id(),projectId,1,JSON.stringify(report),t).run();
-    await env.DB.prepare("DELETE FROM scenes WHERE project_id=?").bind(projectId).run();
+    const scenes=scenesFromWorld(report,Number(project.audio_duration)), t=now(), reportId=id();
+    const statements=[
+      env.DB.prepare("DELETE FROM scenes WHERE project_id=?").bind(projectId),
+      env.DB.prepare("DELETE FROM world_reports WHERE project_id=?").bind(projectId),
+      env.DB.prepare("INSERT INTO world_reports VALUES(?,?,?,?,?)").bind(reportId,projectId,1,JSON.stringify(report),t)
+    ];
     for(const s of scenes) {
-      await env.DB.prepare("INSERT INTO scenes VALUES(?,?,?,?,?,?,?,?)").bind(s.id,projectId,s.scene_index,s.start_seconds,s.duration_seconds,s.prompt,null,t).run();
+      statements.push(env.DB.prepare("INSERT INTO scenes(id,project_id,scene_index,start_seconds,duration_seconds,motion_effect,prompt,image_url,image_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(s.id,projectId,s.scene_index,s.start_seconds,s.duration_seconds,s.motion_effect,s.prompt,null,"pending",t,t));
     }
-    await env.DB.prepare("UPDATE projects SET status='world_revealed',updated_at=? WHERE id=?").bind(t,projectId).run();
+    statements.push(env.DB.prepare("UPDATE projects SET status='world_revealed',updated_at=? WHERE id=?").bind(t,projectId));
+    await env.DB.batch(statements);
     return json({success:true,report,scenes});
   }
 
@@ -302,7 +343,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
     const b=await body(request), name=text(b.filename,160), type=text(b.content_type,120);
     const size=Number(b.size||0);
     if(!name||!type.startsWith("audio/")||!Number.isFinite(size)||size<=0||size>MAX_AUDIO)throw new HttpError("Audio must be a supported audio file under 25 MB",400);
-    const upload=await shotstack(env,"/ingest/upload",{method:"POST",body:JSON.stringify({filename:name})});
+    const upload=await shotstack(env,"/upload",{method:"POST"}, "ingest");
     const sourceId=upload?.data?.id||upload?.data?.attributes?.id;
     const signedUrl=upload?.data?.attributes?.url;
     if(!sourceId||!signedUrl)throw new HttpError("Shotstack did not return an upload URL",502);
@@ -313,25 +354,29 @@ async function handle(request:Request,env:Env):Promise<Response> {
   if(audioComplete) {
     const b=await body(request), sourceId=text(b.source_id,120), name=text(b.filename,160), type=text(b.content_type,120), size=Number(b.size||0);
     if(!sourceId||!name||!type.startsWith("audio/")||!Number.isFinite(size)||size<=0||size>MAX_AUDIO)throw new HttpError("Invalid audio completion data",400);
-    const result:any=await shotstack(env,"/ingest/sources/"+encodeURIComponent(sourceId),{method:"GET"});
+    const result:any=await shotstack(env,"/sources/"+encodeURIComponent(sourceId),{method:"GET"}, "ingest");
     const attrs=result?.data?.attributes;
     if(!attrs)throw new HttpError("Shotstack returned no source details",502);
     if(attrs.status==="failed")throw new HttpError("Shotstack failed to ingest the audio",502);
     if(attrs.status!=="ready")return json({success:true,status:attrs.status,ready:false});
     const sourceUrl=String(attrs.source||"");
-    if(!sourceUrl)throw new HttpError("Shotstack source is ready but has no usable URL",502);
-    await env.DB.prepare("UPDATE projects SET audio_source_id=?,audio_source_url=?,audio_name=?,audio_type=?,audio_size=?,updated_at=? WHERE id=?").bind(sourceId,sourceUrl,name,type,size,now(),projectId).run();
-    return json({success:true,ready:true,status:"ready",source_id:sourceId,source_url:sourceUrl});
+    const duration=Number(attrs.duration||0);
+    if(!sourceUrl||!Number.isFinite(duration)||duration<=0)throw new HttpError("Shotstack source is ready but has no usable URL or duration",502);
+    await env.DB.prepare("UPDATE projects SET audio_source_id=?,audio_source_url=?,audio_name=?,audio_type=?,audio_size=?,audio_duration=?,updated_at=? WHERE id=?").bind(sourceId,sourceUrl,name,type,size,duration,now(),projectId).run();
+    return json({success:true,ready:true,status:"ready",source_id:sourceId,source_url:sourceUrl,duration_seconds:duration});
   }
 
   if(sub==="render"&&method==="POST") {
     if(!(await env.RENDER_RL.limit({key:user.id})).success) return fail("Render rate limit exceeded",429);
+    if(!project.audio_source_url||!Number(project.audio_duration))throw new HttpError("Complete the song audio upload before rendering",400);
     const rows=(await env.DB.prepare("SELECT * FROM scenes WHERE project_id=? ORDER BY scene_index").bind(projectId).all()).results as any[];
-    const clips=rows.filter(s=>s.image_url).map(s=>({asset:{type:"image",src:s.image_url},start:s.start_seconds,length:s.duration_seconds,fit:"cover"}));
-    if(!clips.length)throw new HttpError("Generate at least one scene image before rendering",400);
-    const timeline:any={tracks:[{clips}]};
-    if(project.audio_source_url)timeline.soundtrack={src:project.audio_source_url,effect:"fadeIn",volume:1};
-    const result:any=await shotstack(env,"/render",{method:"POST",body:JSON.stringify({timeline,output:{format:"mp4",size:{width:1280,height:720},fps:25,quality:"medium",poster:{capture:1},thumbnail:{capture:1,scale:0.3}}})});
+    if(!rows.length)throw new HttpError("Generate the World Report before rendering",400);
+    const missing=rows.filter(s=>!s.image_url);
+    if(missing.length)throw new HttpError("All scene images are required before rendering. Missing scenes: "+missing.map(s=>s.scene_index+1).join(", "),409);
+    const clips=rows.map(s=>({asset:{type:"image",src:s.image_url},start:Number(s.start_seconds),length:Number(s.duration_seconds),fit:"crop",effect:s.motion_effect||"zoomIn",transition:{in:"fade",out:"fade"}}));
+    const audio={asset:{type:"audio",src:project.audio_source_url},start:0,length:Number(project.audio_duration),volume:1};
+    const timeline:any={tracks:[{clips},{clips:[audio]}],cache:true};
+    const result:any=await shotstack(env,"/render",{method:"POST",body:JSON.stringify({timeline,output:{format:"mp4",resolution:"hd",aspectRatio:"16:9",fps:25,quality:"medium",poster:{capture:1},thumbnail:{capture:1,scale:0.3}}})});
     const providerId=result?.response?.id;
     if(!providerId)throw new HttpError("Shotstack returned no render ID",502);
     const rid=id(),t=now();

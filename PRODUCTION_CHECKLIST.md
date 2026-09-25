@@ -13,13 +13,13 @@
 - [x] AI JSON is validated before persistence.
 - [x] Project ownership is checked server-side.
 - [x] Authentication is server-side with HttpOnly sessions.
-- [x] PBKDF2 uses 600,000 HMAC-SHA-256 iterations.
-- [x] Authentication and generation rate limits are configured.
+- [x] PBKDF2 uses the Cloudflare-compatible 100,000 HMAC-SHA-256 iteration ceiling.
+- [x] Authentication and generation rate limits are configured using Cloudflare Rate Limit bindings.
 - [x] Shotstack direct-upload signed URLs keep the API key server-side.
 - [x] Provider failures are explicit errors.
 - [x] Existing legacy implementation preserved on legacy-before-rebuild branch.
 
-## Not honestly verified yet
+## Known hardening completed in source\n\n- [x] JSON request bodies are size-limited by actual body bytes, not only Content-Length.\n- [x] Render submission creates a durable D1 record before calling Shotstack.\n- [x] Concurrent render requests are rejected per project.\n- [x] Failed render submission releases the project render lock.\n- [x] Expired sessions are cleaned up during session creation.\n- [x] Workers AI model uses the current FP8 Llama 3.1 8B identifier.\n\n## Not honestly verified yet
 
 - [ ] npm typecheck on a real runtime.
 - [ ] Vitest execution on a real runtime.

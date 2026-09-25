@@ -256,10 +256,18 @@ async function handle(request:Request,env:Env):Promise<Response> {
     const exists=await env.DB.prepare("SELECT id FROM users WHERE username=?").bind(username).first();
     if(exists)return fail("Username already exists",409);
     const p=await makePassword(password), uid=id(), sid=id(), t=now();
-    await env.DB.batch([
-      env.DB.prepare("INSERT INTO users VALUES(?,?,?,?,?)").bind(uid,username,p.hash,p.salt,t),
-      env.DB.prepare("INSERT INTO sessions VALUES(?,?,?,?)").bind(sid,uid,t+SESSION_MS,t)
-    ]);
+    try {
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO users(id,username,password_hash,password_salt,created_at) VALUES(?,?,?,?,?)").bind(uid,username,p.hash,p.salt,t),
+        env.DB.prepare("INSERT INTO sessions(id,user_id,expires_at,created_at) VALUES(?,?,?,?)").bind(sid,uid,t+SESSION_MS,t)
+      ]);
+    } catch(error) {
+      console.error({operation:"auth.register",error});
+      const message=String(error);
+      if(message.includes("UNIQUE constraint failed: users.username")) return fail("Username already exists",409);
+      if(message.includes("no such table") || message.includes("no such column")) return fail("Account database schema is not ready",503);
+      throw error;
+    }
     return json({success:true,user:{id:uid,username}},201,{"set-cookie":cookie(SESSION_COOKIE,sid,SESSION_MS/1000,new URL(request.url).protocol==="https:")});
   }
 

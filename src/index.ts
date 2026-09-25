@@ -10,7 +10,7 @@ const cookie=(r:Request,name:string)=>{const p=name+"=";const x=(r.headers.get("
 const b64=(x:Uint8Array)=>btoa(String.fromCharCode(...x));
 const unb64=(x:string)=>Uint8Array.from(atob(x),c=>c.charCodeAt(0));
 async function sha(x:string){return b64(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(x))))}
-async function pwd(x:string,s:Uint8Array){const k=await crypto.subtle.importKey("raw",new TextEncoder().encode(x),"PBKDF2",false,["deriveBits"]);return b64(new Uint8Array(await crypto.subtle.deriveBits({name:"PBKDF2",salt:s,iterations:600000,hash:"SHA-256"},k,256)))}
+async function pwd(x:string,s:Uint8Array){const k=await crypto.subtle.importKey("raw",new TextEncoder().encode(x),"PBKDF2",false,["deriveBits"]);return b64(new Uint8Array(await crypto.subtle.deriveBits({name:"PBKDF2",salt:s.buffer as ArrayBuffer,iterations:600000,hash:"SHA-256"},k,256)))}
 async function schema(e:Env){await e.DB.batch([
 e.DB.prepare("CREATE TABLE IF NOT EXISTS bv_users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,password_salt TEXT NOT NULL,created_at INTEGER NOT NULL)"),
 e.DB.prepare("CREATE TABLE IF NOT EXISTS bv_sessions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES bv_users(id) ON DELETE CASCADE,token_hash TEXT NOT NULL UNIQUE,expires_at INTEGER NOT NULL,created_at INTEGER NOT NULL)"),

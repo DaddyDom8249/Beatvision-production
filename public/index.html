@@ -41,7 +41,7 @@ pre{white-space:pre-wrap;background:#090b10;padding:15px;border-radius:10px;over
 <section id="reportCard" class="card hidden"><span class="pill">Visual World Report</span><h2 id="reportTitle"></h2><div id="report"></div>
 <div class="row"><button onclick="approve()">Yes, that's my world.</button><span id="approveMsg" class="muted"></span></div></section>
 
-<section id="sceneCard" class="card hidden"><span class="pill">Scenes</span><div id="scenes"></div><div class="row"><button onclick="imageSelected()">Generate scene 1 image</button><button class="secondary" onclick="renderVideo()">Render video</button></div><pre id="job"></pre></section>
+<section id="sceneCard" class="card hidden"><span class="pill">Scenes</span><div id="scenes"></div><div class="row"><button onclick="generateAllImages()">Generate all scene images</button><button class="secondary" onclick="renderVideo()">Render video</button></div><pre id="job"></pre></section>
 </section>
 </main>
 <script>
@@ -52,12 +52,75 @@ function show(id,on){$(id).classList.toggle("hidden",!on)}
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 async function auth(mode){$("authmsg").textContent="Working...";try{await api("/api/auth/"+mode,{method:"POST",body:JSON.stringify({username:$("username").value,password:$("password").value})});show("auth",false);show("app",true)}catch(e){$("authmsg").textContent=e.message}}
 async function logout(){await api("/api/auth/logout",{method:"POST"});location.reload()}
-async function reveal(){ $("status").textContent="Building the world...";try{const p=await api("/api/projects",{method:"POST",body:JSON.stringify({title:$("title").value,artist:$("artist").value,lyrics:$("lyrics").value,creative_direction:$("direction").value,notes:$("notes").value})});projectId=p.project.id;await uploadAudioIfPresent();const d=await api("/api/projects/"+projectId+"/world",{method:"POST"});$("reportTitle").textContent=$("title").value+" — Visual World Report";$("report").innerHTML="<pre>"+esc(JSON.stringify(d.report,null,2))+"</pre>";window.scenes=d.scenes;show("reportCard",true);$("status").textContent="World revealed."}catch(e){$("status").textContent=e.message}}
+async function reveal(){
+  $("status").textContent="Building the world...";
+  try{
+    const audio=$("audio").files[0];
+    if(!audio){$("status").textContent="Song audio is required before revealing the world.";return}
+    const p=await api("/api/projects",{method:"POST",body:JSON.stringify({title:$("title").value,artist:$("artist").value,lyrics:$("lyrics").value,creative_direction:$("direction").value,notes:$("notes").value})});
+    projectId=p.project.id;
+    await uploadAudioIfPresent();
+    const d=await api("/api/projects/"+projectId+"/world",{method:"POST"});
+    $("reportTitle").textContent=$("title").value+" — Visual World Report";
+    $("report").innerHTML="<pre>"+esc(JSON.stringify(d.report,null,2))+"</pre>";
+    window.scenes=d.scenes;
+    show("reportCard",true);
+    $("status").textContent="World revealed.";
+  }catch(e){$("status").textContent=e.message}
+}
 async function uploadAudioIfPresent(){const f=$("audio").files[0];if(!f)return;$("audioStatus").textContent="Preparing audio upload...";const u=await api("/api/projects/"+projectId+"/audio/upload-url",{method:"POST",body:JSON.stringify({filename:f.name,content_type:f.type,size:f.size})});$("audioStatus").textContent="Uploading audio...";const put=await fetch(u.upload_url,{method:"PUT",headers:{"Content-Type":f.type},body:f});if(!put.ok)throw Error("Audio upload failed");for(let i=0;i<20;i++){const d=await api("/api/projects/"+projectId+"/audio/complete",{method:"POST",body:JSON.stringify({source_id:u.source_id,filename:f.name,content_type:f.type,size:f.size})});if(d.ready){$("audioStatus").textContent="Audio ready.";return}await new Promise(r=>setTimeout(r,2000));}throw Error("Audio ingestion timed out");}
-async function approve(){try{const d=await api("/api/projects/"+projectId+"/approve",{method:"POST"});window.scenes=d.scenes;renderScenes(d.scenes);$("approveMsg").textContent="World locked."}catch(e){$("approveMsg").textContent=e.message}}
+async function approve(){
+  try{
+    const d=await api("/api/projects/"+projectId+"/approve",{method:"POST"});
+    window.scenes=d.scenes;
+    renderScenes(d.scenes);
+    $("approveMsg").textContent="World locked. Generate every scene image before rendering.";
+  }catch(e){$("approveMsg").textContent=e.message}
+}
 function renderScenes(scenes){show("sceneCard",true);$("scenes").innerHTML=scenes.map((s,i)=>'<div class="scene"><b>Scene '+(i+1)+'</b><p>'+esc(s.prompt)+'</p>'+((s.image_url)?'<img src="'+esc(s.image_url)+'">':"")+"</div>").join("")}
-async function imageSelected(){try{$("job").textContent="Generating scene 1...";const d=await api("/api/projects/"+projectId+"/scenes/0/image",{method:"POST"});window.scenes[0].image_url=d.image_url;renderScenes(window.scenes);$("job").textContent="Image generated."}catch(e){$("job").textContent=e.message}}
-async function renderVideo(){try{$("job").textContent="Submitting Shotstack render...";const d=await api("/api/projects/"+projectId+"/render",{method:"POST"});$("job").textContent=JSON.stringify(d,null,2)}catch(e){$("job").textContent=e.message}}
+async function imageScene(index){
+  try{
+    $("job").textContent="Generating scene "+(index+1)+"...";
+    const d=await api("/api/projects/"+projectId+"/scenes/"+index+"/image",{method:"POST"});
+    window.scenes[index].image_url=d.image_url;
+    window.scenes[index].image_status="completed";
+    renderScenes(window.scenes);
+    $("job").textContent="Scene "+(index+1)+" image generated.";
+  }catch(e){$("job").textContent=e.message}
+}
+async function imageSelected(){return imageScene(0)}
+async function generateAllImages(){
+  try{
+    for(let i=0;i<window.scenes.length;i++){
+      if(window.scenes[i].image_url)continue;
+      $("job").textContent="Generating scene "+(i+1)+" of "+window.scenes.length+"...";
+      const d=await api("/api/projects/"+projectId+"/scenes/"+i+"/image",{method:"POST"});
+      window.scenes[i].image_url=d.image_url;
+      window.scenes[i].image_status="completed";
+      renderScenes(window.scenes);
+    }
+    $("job").textContent="All scene images generated.";
+  }catch(e){$("job").textContent=e.message}
+}
+async function renderVideo(){
+  try{
+    $("job").textContent="Submitting Shotstack render...";
+    const d=await api("/api/projects/"+projectId+"/render",{method:"POST"});
+    $("job").textContent="Render queued: "+d.render_id;
+    pollRender(d.render_id);
+  }catch(e){$("job").textContent=e.message}
+}
+async function pollRender(renderId){
+  for(let i=0;i<60;i++){
+    await new Promise(r=>setTimeout(r,3000));
+    try{
+      const d=await api("/api/projects/"+projectId+"/render/"+renderId);
+      $("job").textContent=JSON.stringify(d,null,2);
+      if(d.status==="done"||d.status==="failed")return;
+    }catch(e){$("job").textContent=e.message;return}
+  }
+  $("job").textContent="Render is still processing. Refresh later to check the job.";
+}
 (async()=>{try{const d=await api("/api/me");if(d.user){show("auth",false);show("app",true)}}catch{}})();
 </script>
 </body></html>

@@ -3,9 +3,15 @@
   "name":"beatvision-production",
   "main":"src/index.ts",
   "compatibility_date":"2026-09-24",
+  "workers_dev":true,
+  "preview_urls":true,
   "assets":{"directory":"./public","binding":"ASSETS","not_found_handling":"single-page-application"},
   "ai":{"binding":"AI"},
   "d1_databases":[{"binding":"DB","database_name":"beatvision","database_id":"869a2f6b-02e0-4f86-8d71-64c7fb8378f6"}],
   "ratelimits":[{"name":"AUTH_RL","namespace_id":"1000","simple":{"limit":10,"period":60}},{"name":"WORLD_RL","namespace_id":"1001","simple":{"limit":4,"period":60}},{"name":"IMAGE_RL","namespace_id":"1002","simple":{"limit":4,"period":60}},{"name":"RENDER_RL","namespace_id":"1003","simple":{"limit":2,"period":60}}],
-  "secrets":{"required":["PIXAZO_API_KEY","SHOTSTACK_API_KEY"]}
+  "secrets":{"required":["PIXAZO_API_KEY","SHOTSTACK_API_KEY"]},
+  "observability":{
+    "logs":{"enabled":true,"head_sampling_rate":1,"invocation_logs":true,"persist":true},
+    "traces":{"enabled":true,"head_sampling_rate":1,"persist":true}
+  }
 }

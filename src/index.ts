@@ -1,6 +1,5 @@
 interface Env {
   DB: D1Database;
-  MEDIA: R2Bucket;
   AI: Ai;
   ASSETS: Fetcher;
   PIXAZO_API_KEY: string;

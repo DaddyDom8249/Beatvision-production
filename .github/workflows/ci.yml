@@ -5,37 +5,17 @@ on:
   pull_request:
     branches: [main]
 permissions:
-  contents: write
+  contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: 22}
+        with:
+          node-version: 22
       - run: npm install -g npm@12.1.0
       - run: npm install --no-audit --no-fund
-      - name: Apply production hardening
-        if: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, '[hardening-bot]') }}
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          p=Path('src/index.ts')
-          s=p.read_text()
-          s=s.replace('interface Env{DB:D1Database;AI:Ai;ASSETS:Fetcher;PIXAZO_API_KEY:string;SHOTSTACK_API_KEY:string}', 'interface Env{DB:D1Database;AI:Ai;ASSETS:Fetcher;PIXAZO_API_KEY:string;SHOTSTACK_API_KEY:string;AUTH_RL:RateLimit;WORLD_RL:RateLimit;IMAGE_RL:RateLimit;RENDER_RL:RateLimit}')
-          s=s.replace('const n=()=>Date.now();', 'const n=()=>Date.now();\nconst limit=async(e:Env,k:keyof Pick<Env,"AUTH_RL"|"WORLD_RL"|"IMAGE_RL"|"RENDER_RL">,key:string)=>{const r=await e[k].limit({key});if(!r.success)throw j({success:false,error:"Rate limit exceeded"},429,{"retry-after":"60"})};\nlet schemaReady:Promise<void>|null=null;\nconst ensureSchema=(e:Env)=>schemaReady??=(schema(e).catch(err=>{schemaReady=null;throw err}));')
-          s=s.replace('await schema(e);const u=new URL(r.url)', 'await ensureSchema(e);const u=new URL(r.url)')
-          s=s.replace('const b=await body(r),un=reqs(b.username,"username",3,32),pw=reqs(b.password,"password",10,128);', 'const b=await body(r),un=reqs(b.username,"username",3,32),pw=reqs(b.password,"password",10,128);await limit(e,"AUTH_RL","register:"+un.toLowerCase());')
-          s=s.replace('const b=await body(r),un=reqs(b.username,"username",3,32),pw=reqs(b.password,"password",10,128),x=', 'const b=await body(r),un=reqs(b.username,"username",3,32),pw=reqs(b.password,"password",10,128);await limit(e,"AUTH_RL","login:"+un.toLowerCase());const x=')
-          s=s.replace('if(x[2]==="world"){const w=', 'if(x[2]==="world"){await limit(e,"WORLD_RL","user:"+u.id+":world");const w=')
-          s=s.replace('if(x[2]==="image"){const w=', 'if(x[2]==="image"){await limit(e,"IMAGE_RL","user:"+u.id+":image");const w=')
-          s=s.replace('if(!q.hero_image_url||!q.audio_source_url||!q.audio_duration)return j({success:false,error:"Image and prepared audio are required"},409);const rid=', 'if(!q.hero_image_url||!q.audio_source_url||!q.audio_duration)return j({success:false,error:"Image and prepared audio are required"},409);await limit(e,"RENDER_RL","user:"+u.id+":render");const rid=')
-          p.write_text(s)
-          PY
-          git config user.name 'beatvision-hardening-bot'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/index.ts
-          git diff --cached --quiet || (git commit -m 'security: enforce Worker rate limits and schema initialization [hardening-bot]' && git push origin main)
       - run: npm run typecheck
       - run: npm test
       - run: npx wrangler deploy --dry-run

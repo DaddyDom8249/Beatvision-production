@@ -76,7 +76,8 @@ function hexToBytes(hex:string) {
 }
 async function derivePassword(password:string,salt:Uint8Array) {
   const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(password),"PBKDF2",false,["deriveBits"]);
-  return new Uint8Array(await crypto.subtle.deriveBits({name:"PBKDF2",salt,iterations:600000,hash:"SHA-256"},key,256));
+  const saltBuffer=salt.buffer.slice(salt.byteOffset,salt.byteOffset+salt.byteLength) as ArrayBuffer;
+  return new Uint8Array(await crypto.subtle.deriveBits({name:"PBKDF2",salt:saltBuffer,iterations:600000,hash:"SHA-256"},key,256));
 }
 async function makePassword(password:string,saltHex?:string) {
   const salt=saltHex?hexToBytes(saltHex):crypto.getRandomValues(new Uint8Array(16));
@@ -172,7 +173,8 @@ async function worldReport(env:Env,project:any):Promise<WorldReport> {
     "characters must be an array of objects with name, role, visual_identity. scene_count must be 4-24. " +
     "Song title: "+project.title+"\nArtist: "+project.artist+"\nLyrics/context: "+project.lyrics+
     "\nCreative direction: "+project.creative_direction+"\nNotes: "+project.notes;
-  const result:any=await env.AI.run(AI_MODEL,{
+  const aiRun=(env.AI as unknown as {run:(model:string,input:unknown,options?:unknown)=>Promise<unknown>}).run.bind(env.AI);
+  const result:any=await aiRun(AI_MODEL,{
     messages:[
       {role:"system",content:"You produce strict machine-readable JSON for a visual production pipeline."},
       {role:"user",content:prompt}

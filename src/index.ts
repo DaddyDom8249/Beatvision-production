@@ -325,7 +325,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
     if(!report)throw new HttpError("Generate the World Report first",400);
     await env.DB.prepare("UPDATE projects SET status='world_approved',updated_at=? WHERE id=?").bind(now(),projectId).run();
     const rows=await env.DB.prepare("SELECT * FROM scenes WHERE project_id=? ORDER BY scene_index").bind(projectId).all();
-    return json({success:true,scenes:rows.results});
+    return json({success:true,images_complete:Number(missing?.count||0)===0,missing_images:Number(missing?.count||0),scenes:rows.results});
   }
 
   const imageMatch=sub.match(/^scenes\/(\d+)\/image$/);

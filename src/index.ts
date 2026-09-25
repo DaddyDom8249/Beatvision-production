@@ -2,6 +2,10 @@ interface Env {
   DB: D1Database;
   AI: Ai;
   ASSETS: Fetcher;
+  AUTH_RL: RateLimit;
+  WORLD_RL: RateLimit;
+  IMAGE_RL: RateLimit;
+  RENDER_RL: RateLimit;
   PIXAZO_API_KEY: string;
   SHOTSTACK_API_KEY: string;
 }
@@ -45,10 +49,10 @@ function text(value: unknown, max = MAX_TEXT): string {
 }
 function validUsername(value: string) { return /^[a-z0-9_]{3,32}$/.test(value); }
 function validPassword(value: string) { return value.length >= 10 && value.length <= 200; }
-function cookie(name:string,value:string,maxAge:number) {
-  return name + "=" + encodeURIComponent(value) + "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Lax";
+function cookie(name:string,value:string,maxAge:number,secure=true) {
+  return name + "=" + encodeURIComponent(value) + "; Path=/; Max-Age=" + maxAge + "; HttpOnly; SameSite=Lax" + (secure?"; Secure":"");
 }
-function clearCookie(name:string) { return name + "=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"; }
+function clearCookie(name:string,secure=true) { return name + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax" + (secure?"; Secure":""); }
 
 function bytesToHex(buffer:ArrayBuffer|Uint8Array) {
   return Array.from(new Uint8Array(buffer)).map(v=>v.toString(16).padStart(2,"0")).join("");
@@ -60,7 +64,7 @@ function hexToBytes(hex:string) {
 }
 async function derivePassword(password:string,salt:Uint8Array) {
   const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(password),"PBKDF2",false,["deriveBits"]);
-  return new Uint8Array(await crypto.subtle.deriveBits({name:"PBKDF2",salt,iterations:120000,hash:"SHA-256"},key,256));
+  return new Uint8Array(await crypto.subtle.deriveBits({name:"PBKDF2",salt,iterations:600000,hash:"SHA-256"},key,256));
 }
 async function makePassword(password:string,saltHex?:string) {
   const salt=saltHex?hexToBytes(saltHex):crypto.getRandomValues(new Uint8Array(16));
@@ -210,6 +214,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
   if(path==="/api/me")return json({user:await currentUser(request,env)});
 
   if(path==="/api/auth/register"&&method==="POST") {
+    if(!(await env.AUTH_RL.limit({key:request.headers.get("CF-Connecting-IP")||"unknown"})).success) return fail("Too many authentication requests",429);
     const b=await body(request), username=text(b.username,32).toLowerCase(), password=String(b.password||"");
     if(!validUsername(username)||!validPassword(password))return fail("Username must be 3-32 lowercase letters/numbers/underscore and password must be 10-200 characters");
     const exists=await env.DB.prepare("SELECT id FROM users WHERE username=?").bind(username).first();
@@ -217,10 +222,11 @@ async function handle(request:Request,env:Env):Promise<Response> {
     const p=await makePassword(password), uid=id(), sid=id(), t=now();
     await env.DB.prepare("INSERT INTO users VALUES(?,?,?,?,?)").bind(uid,username,p.hash,p.salt,t).run();
     await env.DB.prepare("INSERT INTO sessions VALUES(?,?,?,?)").bind(sid,uid,t+SESSION_MS,t).run();
-    return json({success:true,user:{id:uid,username}},201,{"set-cookie":cookie(SESSION_COOKIE,sid,SESSION_MS/1000)});
+    return json({success:true,user:{id:uid,username}},201,{"set-cookie":cookie(SESSION_COOKIE,sid,SESSION_MS/1000,new URL(request.url).protocol==="https:")});
   }
 
   if(path==="/api/auth/login"&&method==="POST") {
+    if(!(await env.AUTH_RL.limit({key:request.headers.get("CF-Connecting-IP")||"unknown"})).success) return fail("Too many authentication requests",429);
     const b=await body(request), username=text(b.username,32).toLowerCase(), password=String(b.password||"");
     const key=(request.headers.get("CF-Connecting-IP")||"unknown")+":"+username;
     const attempt=await env.DB.prepare("SELECT * FROM login_attempts WHERE key=?").bind(key).first<any>();
@@ -235,12 +241,12 @@ async function handle(request:Request,env:Env):Promise<Response> {
     await env.DB.prepare("DELETE FROM login_attempts WHERE key=?").bind(key).run();
     const sid=id(),t=now();
     await env.DB.prepare("INSERT INTO sessions VALUES(?,?,?,?)").bind(sid,row.id,t+SESSION_MS,t).run();
-    return json({success:true,user:{id:row.id,username:row.username}},200,{"set-cookie":cookie(SESSION_COOKIE,sid,SESSION_MS/1000)});
+    return json({success:true,user:{id:row.id,username:row.username}},200,{"set-cookie":cookie(SESSION_COOKIE,sid,SESSION_MS/1000,new URL(request.url).protocol==="https:")});
   }
 
   if(path==="/api/auth/logout"&&method==="POST") {
     const sid=getSessionId(request); if(sid)await env.DB.prepare("DELETE FROM sessions WHERE id=?").bind(sid).run();
-    return json({success:true},200,{"set-cookie":clearCookie(SESSION_COOKIE)});
+    return json({success:true},200,{"set-cookie":clearCookie(SESSION_COOKIE,new URL(request.url).protocol==="https:")});
   }
 
   const user=await requireUser(request,env);
@@ -261,6 +267,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
   const project=await projectForUser(env,user,projectId);
 
   if(sub==="world"&&method==="POST") {
+    if(!(await env.WORLD_RL.limit({key:user.id})).success) return fail("World generation rate limit exceeded",429);
     const report=await worldReport(env,project);
     const scenes=scenesFromWorld(report), t=now();
     await env.DB.prepare("INSERT OR REPLACE INTO world_reports VALUES(?,?,?,?,?)").bind(id(),projectId,1,JSON.stringify(report),t).run();
@@ -285,6 +292,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
     const index=Number(imageMatch[1]);
     const scene=await env.DB.prepare("SELECT * FROM scenes WHERE project_id=? AND scene_index=?").bind(projectId,index).first<any>();
     if(!scene)throw new HttpError("Scene not found",404);
+    if(!(await env.IMAGE_RL.limit({key:user.id})).success) return fail("Image generation rate limit exceeded",429);
     const imageUrl=await pixazoGenerate(env,scene.prompt);
     await env.DB.prepare("UPDATE scenes SET image_url=? WHERE id=?").bind(imageUrl,scene.id).run();
     return json({success:true,scene_index:index,image_url:imageUrl});
@@ -318,6 +326,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
   }
 
   if(sub==="render"&&method==="POST") {
+    if(!(await env.RENDER_RL.limit({key:user.id})).success) return fail("Render rate limit exceeded",429);
     const rows=(await env.DB.prepare("SELECT * FROM scenes WHERE project_id=? ORDER BY scene_index").bind(projectId).all()).results as any[];
     const clips=rows.filter(s=>s.image_url).map(s=>({asset:{type:"image",src:s.image_url},start:s.start_seconds,length:s.duration_seconds,fit:"cover"}));
     if(!clips.length)throw new HttpError("Generate at least one scene image before rendering",400);

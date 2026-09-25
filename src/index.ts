@@ -149,7 +149,7 @@ async function worldReport(env:Env,project:any):Promise<WorldReport> {
       {role:"user",content:prompt}
     ],
     response_format:{type:"json_object"}
-  });
+  },{rejectIfBusy:true});
   const raw=result?.response ?? result?.result ?? result?.text ?? result;
   let parsed:any;
   try { parsed=typeof raw==="string"?JSON.parse(raw):raw; } catch { throw new HttpError("Workers AI returned invalid JSON",502); }
@@ -299,9 +299,23 @@ async function handle(request:Request,env:Env):Promise<Response> {
     const sourceId=upload?.data?.id||upload?.data?.attributes?.id;
     const signedUrl=upload?.data?.attributes?.url;
     if(!sourceId||!signedUrl)throw new HttpError("Shotstack did not return an upload URL",502);
-    await env.DB.prepare("UPDATE projects SET audio_source_id=?,audio_name=?,audio_type=?,audio_size=?,updated_at=? WHERE id=?")
-      .bind(String(sourceId),name,type,size,now(),projectId).run();
-    return json({success:true,source_id:String(sourceId),upload_url:String(signedUrl)});
+    return json({success:true,source_id:String(sourceId),upload_url:String(signedUrl),filename:name,content_type:type,size});
+  }
+
+  const audioComplete=sub==="audio/complete"&&method==="POST";
+  if(audioComplete) {
+    const b=await body(request), sourceId=text(b.source_id,120), name=text(b.filename,160), type=text(b.content_type,120), size=Number(b.size||0);
+    if(!sourceId||!name||!type.startsWith("audio/")||!Number.isFinite(size)||size<=0||size>MAX_AUDIO)throw new HttpError("Invalid audio completion data",400);
+    const result:any=await shotstack(env,"/ingest/sources/"+encodeURIComponent(sourceId),{method:"GET"});
+    const attrs=result?.data?.attributes;
+    if(!attrs)throw new HttpError("Shotstack returned no source details",502);
+    if(attrs.status==="failed")throw new HttpError("Shotstack failed to ingest the audio",502);
+    if(attrs.status!=="ready")return json({success:true,status:attrs.status,ready:false});
+    const sourceUrl=String(attrs.source||"");
+    if(!sourceUrl)throw new HttpError("Shotstack source is ready but has no usable URL",502);
+    await env.DB.prepare("UPDATE projects SET audio_source_id=?,audio_source_url=?,audio_name=?,audio_type=?,audio_size=?,updated_at=? WHERE id=?").bind(sourceId,sourceUrl,name,type,size,now(),projectId).run();
+    return json({success:true,ready:true,status:"ready",source_id:sourceId,source_url:sourceUrl});
+  }
   }
 
   if(sub==="render"&&method==="POST") {
@@ -309,7 +323,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
     const clips=rows.filter(s=>s.image_url).map(s=>({asset:{type:"image",src:s.image_url},start:s.start_seconds,length:s.duration_seconds,fit:"cover"}));
     if(!clips.length)throw new HttpError("Generate at least one scene image before rendering",400);
     const timeline:any={tracks:[{clips}]};
-    if(project.audio_source_id)timeline.soundtrack={src:"https://api.shotstack.io/v1/serve/assets/"+encodeURIComponent(project.audio_source_id),effect:"fadeIn",volume:1};
+    if(project.audio_source_url)timeline.soundtrack={src:project.audio_source_url,effect:"fadeIn",volume:1};
     const result:any=await shotstack(env,"/render",{method:"POST",body:JSON.stringify({timeline,output:{format:"mp4",size:{width:1280,height:720},fps:25,quality:"medium",poster:{capture:1},thumbnail:{capture:1,scale:0.3}}})});
     const providerId=result?.response?.id;
     if(!providerId)throw new HttpError("Shotstack returned no render ID",502);

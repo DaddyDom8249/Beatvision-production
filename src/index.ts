@@ -323,7 +323,6 @@ async function handle(request:Request,env:Env):Promise<Response> {
     await env.DB.prepare("UPDATE projects SET audio_source_id=?,audio_source_url=?,audio_name=?,audio_type=?,audio_size=?,updated_at=? WHERE id=?").bind(sourceId,sourceUrl,name,type,size,now(),projectId).run();
     return json({success:true,ready:true,status:"ready",source_id:sourceId,source_url:sourceUrl});
   }
-  }
 
   if(sub==="render"&&method==="POST") {
     if(!(await env.RENDER_RL.limit({key:user.id})).success) return fail("Render rate limit exceeded",429);

@@ -41,7 +41,7 @@ const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_TEXT = 30000;
 const MAX_AUDIO = 25 * 1024 * 1024;
 const AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
-const BUILD = "2026-09-25-production-remediation-1";
+const BUILD = "2026-09-25-production-remediation-2";
 const SHOTSTACK_INGEST_BASE = "https://api.shotstack.io/ingest/v1";
 const SHOTSTACK_EDIT_BASE = "https://api.shotstack.io/edit/v1";
 
@@ -96,6 +96,16 @@ function getSessionId(request:Request) {
   const match=header.match(/(?:^|;\s*)bv_session=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
+async function ensureAuthSchema(env:Env) {
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,password_salt TEXT NOT NULL,created_at INTEGER NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,expires_at INTEGER NOT NULL,created_at INTEGER NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS login_attempts(key TEXT PRIMARY KEY,count INTEGER NOT NULL,window_start INTEGER NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+  ]);
+}
+
 async function currentUser(request:Request,env:Env):Promise<User|null> {
   const sid=getSessionId(request); if(!sid)return null;
   const row=await env.DB.prepare(
@@ -246,10 +256,17 @@ async function handle(request:Request,env:Env):Promise<Response> {
   if(!originAllowed(request))return fail("Invalid origin",403);
   const url=new URL(request.url), path=url.pathname, method=request.method;
 
-  if(path==="/api/health")return json({ok:true,service:"beatvision",build:BUILD,language:"cloudflare-workers-ai",image:"pixazo",video:"shotstack"});
+  if(path==="/api/health") {
+    const tables=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','sessions','login_attempts','projects','world_reports','scenes','renders') ORDER BY name").all<{name:string}>();
+    const names=(tables.results||[]).map(row=>row.name);
+    const required=["users","sessions","login_attempts","projects","world_reports","scenes","renders"];
+    const missing=required.filter(name=>!names.includes(name));
+    return json({ok:missing.length===0,service:"beatvision",build:BUILD,language:"cloudflare-workers-ai",image:"pixazo",video:"shotstack",database:{required_tables:required,present_tables:names,missing_tables:missing}});
+  }
   if(path==="/api/me")return json({user:await currentUser(request,env)});
 
   if(path==="/api/auth/register"&&method==="POST") {
+    await ensureAuthSchema(env);
     if(!(await env.AUTH_RL.limit({key:request.headers.get("CF-Connecting-IP")||"unknown"})).success) return fail("Too many authentication requests",429);
     const b=await body(request), username=text(b.username,32).toLowerCase(), password=String(b.password||"");
     if(!validUsername(username)||!validPassword(password))return fail("Username must be 3-32 lowercase letters/numbers/underscore and password must be 10-200 characters");
@@ -335,7 +352,8 @@ async function handle(request:Request,env:Env):Promise<Response> {
     if(!report)throw new HttpError("Generate the World Report first",400);
     await env.DB.prepare("UPDATE projects SET status='world_approved',updated_at=? WHERE id=?").bind(now(),projectId).run();
     const rows=await env.DB.prepare("SELECT * FROM scenes WHERE project_id=? ORDER BY scene_index").bind(projectId).all();
-    return json({success:true,images_complete:Number(missing?.count||0)===0,missing_images:Number(missing?.count||0),scenes:rows.results});
+    const missing=(rows.results||[]).filter((scene:any)=>!scene.image_url);
+    return json({success:true,images_complete:missing.length===0,missing_images:missing.length,scenes:rows.results});
   }
 
   const imageMatch=sub.match(/^scenes\/(\d+)\/image$/);
@@ -345,7 +363,7 @@ async function handle(request:Request,env:Env):Promise<Response> {
     if(!scene)throw new HttpError("Scene not found",404);
     if(!(await env.IMAGE_RL.limit({key:user.id})).success) return fail("Image generation rate limit exceeded",429);
     const imageUrl=await pixazoGenerate(env,scene.prompt);
-    await env.DB.prepare("UPDATE scenes SET image_url=? WHERE id=?").bind(imageUrl,scene.id).run();
+    await env.DB.prepare("UPDATE scenes SET image_url=?,image_status='completed',updated_at=? WHERE id=?").bind(imageUrl,now(),scene.id).run();
     return json({success:true,scene_index:index,image_url:imageUrl});
   }
 
@@ -413,14 +431,6 @@ async function handle(request:Request,env:Env):Promise<Response> {
 
 export default {
   async fetch(request:Request,env:Env,ctx:ExecutionContext) {
-    // Deployment probe: deliberately bypasses all bindings, auth, D1, AI and providers.
-    // If this route fails, the problem is Worker deployment/routing rather than application logic.
-    if (new URL(request.url).pathname === "/api/health" && request.method === "GET") {
-      return new Response(JSON.stringify({ok:true,service:"beatvision",build:"2026-09-24-ground-zero-probe"}), {
-        status:200,
-        headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-beatvision-build":"2026-09-24-ground-zero-probe"}
-      });
-    }
     try {
       const response=await handle(request,env);
       if(response.status===404 && request.method==="GET" && !new URL(request.url).pathname.startsWith("/api/")) return env.ASSETS.fetch(request);

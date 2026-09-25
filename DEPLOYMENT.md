@@ -56,3 +56,35 @@ A release is not considered production-ready until all of these pass in the depl
 - rate-limit behavior
 - secret-leak scan
 - mobile browser smoke test
+
+
+## Production remediation
+
+The current media pipeline requires the remote D1 schema migration in `migrations/0002-production-remediation.sql`.
+
+Run this from a trusted machine with the Cloudflare account authenticated:
+
+```bash
+npx wrangler d1 execute beatvision --remote --file=./migrations/0002-production-remediation.sql
+```
+
+Then verify the schema:
+
+```bash
+npx wrangler d1 execute beatvision --remote --command="PRAGMA table_info(projects)"
+npx wrangler d1 execute beatvision --remote --command="PRAGMA table_info(scenes)"
+```
+
+The Worker uses the documented Shotstack production API bases:
+
+- Ingest: `https://api.shotstack.io/ingest/v1`
+- Edit: `https://api.shotstack.io/edit/v1`
+
+Shotstack ingest reports the uploaded audio duration, which BeatVision stores and uses to build the storyboard timeline. The renderer refuses to render until every generated scene has an image and the song audio is ready.
+
+The only external provider secrets required by the Worker are:
+
+- `PIXAZO_API_KEY`
+- `SHOTSTACK_API_KEY`
+
+No provider API key is required for the language engine because it uses the Cloudflare Workers AI binding.

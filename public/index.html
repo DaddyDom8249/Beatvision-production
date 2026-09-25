@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#08090c"><title>BeatVision</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color:#f4f5f7;background:#08090c}*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 15% 0,#22293a,#08090c 48%);min-height:100vh}
+main{max-width:1080px;margin:auto;padding:28px 18px 80px}.brand{font-weight:900;font-size:28px;letter-spacing:-.04em}.tag{color:#aeb5c5;margin:5px 0 28px}
+.card{background:#10131a;border:1px solid #272e3c;border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 16px 50px #0005}
+h1{font-size:42px;letter-spacing:-.055em;margin:0 0 10px}h2{margin:0 0 12px}label{display:block;color:#aeb5c5;font-size:13px;margin-bottom:6px}
+input,textarea,button{font:inherit}input,textarea{width:100%;background:#0a0d12;color:#fff;border:1px solid #343b4a;border-radius:10px;padding:12px}textarea{min-height:120px;resize:vertical}
+button{border:0;border-radius:10px;padding:12px 17px;font-weight:800;cursor:pointer;background:#f5f6f8;color:#08090c}.secondary{background:#262d3a;color:#fff}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.full{grid-column:1/-1}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.muted{color:#9199aa}.error{color:#ff9999}.ok{color:#9af1b5}
+pre{white-space:pre-wrap;background:#090b10;padding:15px;border-radius:10px;overflow:auto}.pill{font-size:12px;background:#252c39;padding:5px 9px;border-radius:99px;color:#cbd2df}
+.hidden{display:none}.scene{border:1px solid #2a3140;border-radius:12px;padding:14px;margin:10px 0}.scene img{max-width:100%;border-radius:10px;margin-top:10px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}h1{font-size:33px}}
+</style>
+</head>
+<body><main>
+<div class="brand">BeatVision</div><div class="tag">Every Song Has a World. BeatVision Reveals It.</div>
+
+<section id="auth" class="card">
+<h1>Reveal the world.</h1><p class="muted">One app. No Gemini key. No OpenAI key. No provider maze.</p>
+<div class="grid"><div><label>Username</label><input id="username" autocomplete="username"></div><div><label>Password</label><input id="password" type="password" autocomplete="current-password"></div></div>
+<div class="row" style="margin-top:14px"><button onclick="auth('login')">Sign in</button><button class="secondary" onclick="auth('register')">Create account</button><span id="authmsg" class="muted"></span></div>
+</section>
+
+<section id="app" class="hidden">
+<div class="card"><div class="row"><span class="pill">World Engine</span><button class="secondary" onclick="logout()">Sign out</button></div>
+<h1>Create the song world.</h1>
+<div class="grid">
+<div><label>Song title</label><input id="title"></div><div><label>Artist</label><input id="artist"></div>
+<div class="full"><label>Lyrics</label><textarea id="lyrics" placeholder="Paste lyrics or a description of the song."></textarea></div>
+<div class="full"><label>Creative direction</label><textarea id="direction" placeholder="Mood, era, visual references, performance style, things to avoid..."></textarea></div>
+<div class="full"><label>Notes</label><textarea id="notes"></textarea></div>
+</div>
+<div class="row" style="margin-top:14px"><button onclick="reveal()">Reveal World</button><span id="status" class="muted"></span></div>
+</div>
+
+<section id="reportCard" class="card hidden"><span class="pill">Visual World Report</span><h2 id="reportTitle"></h2><div id="report"></div>
+<div class="row"><button onclick="approve()">Yes, that's my world.</button><span id="approveMsg" class="muted"></span></div></section>
+
+<section id="sceneCard" class="card hidden"><span class="pill">Scenes</span><div id="scenes"></div><div class="row"><button onclick="imageSelected()">Generate scene 1 image</button><button class="secondary" onclick="renderVideo()">Render video</button></div><pre id="job"></pre></section>
+</section>
+</main>
+<script>
+let projectId=null;
+const $=id=>document.getElementById(id);
+async function api(path,options={}){const r=await fetch(path,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({error:"Invalid server response"}));if(!r.ok)throw Error(d.error||"Request failed");return d}
+function show(id,on){$(id).classList.toggle("hidden",!on)}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function auth(mode){$("authmsg").textContent="Working...";try{await api("/api/auth/"+mode,{method:"POST",body:JSON.stringify({username:$("username").value,password:$("password").value})});show("auth",false);show("app",true)}catch(e){$("authmsg").textContent=e.message}}
+async function logout(){await api("/api/auth/logout",{method:"POST"});location.reload()}
+async function reveal(){ $("status").textContent="Building the world...";try{const p=await api("/api/projects",{method:"POST",body:JSON.stringify({title:$("title").value,artist:$("artist").value,lyrics:$("lyrics").value,creative_direction:$("direction").value,notes:$("notes").value})});projectId=p.project.id;const d=await api("/api/projects/"+projectId+"/world",{method:"POST"});$("reportTitle").textContent=$("title").value+" — Visual World Report";$("report").innerHTML="<pre>"+esc(JSON.stringify(d.report,null,2))+"</pre>";window.scenes=d.scenes;show("reportCard",true);$("status").textContent="World revealed."}catch(e){$("status").textContent=e.message}}
+async function approve(){try{const d=await api("/api/projects/"+projectId+"/approve",{method:"POST"});window.scenes=d.scenes;renderScenes(d.scenes);$("approveMsg").textContent="World locked."}catch(e){$("approveMsg").textContent=e.message}}
+function renderScenes(scenes){show("sceneCard",true);$("scenes").innerHTML=scenes.map((s,i)=>'<div class="scene"><b>Scene '+(i+1)+'</b><p>'+esc(s.prompt)+'</p>'+((s.image_url)?'<img src="'+esc(s.image_url)+'">':"")+"</div>").join("")}
+async function imageSelected(){try{$("job").textContent="Generating scene 1...";const d=await api("/api/projects/"+projectId+"/scenes/0/image",{method:"POST"});window.scenes[0].image_url=d.image_url;renderScenes(window.scenes);$("job").textContent="Image generated."}catch(e){$("job").textContent=e.message}}
+async function renderVideo(){try{$("job").textContent="Submitting Shotstack render...";const d=await api("/api/projects/"+projectId+"/render",{method:"POST"});$("job").textContent=JSON.stringify(d,null,2)}catch(e){$("job").textContent=e.message}}
+(async()=>{try{const d=await api("/api/me");if(d.user){show("auth",false);show("app",true)}}catch{}})();
+</script>
+</body></html>

@@ -60,7 +60,7 @@ ai=await e.AI.run(AI_MODEL,{prompt,max_tokens:2048,temperature:0.2,response_form
 }catch{throw providerError("Workers AI world generation failed","world.ai")}
 const output=typeof ai==="string"?ai:typeof ai?.response==="string"?ai.response:"";
 if(!output.trim())throw providerError("Workers AI returned no world report","world.ai");
-return parseWorld(output)
+return parseWorld(output)}
 async function pixazo(e:Env,prompt:string){const r=await fetch(PIXAZO,{method:"POST",signal:AbortSignal.timeout(30000),headers:{"Content-Type":"application/json","Cache-Control":"no-cache","Ocp-Apim-Subscription-Key":e.PIXAZO_API_KEY},body:JSON.stringify({prompt:prompt.slice(0,2048),num_steps:4,width:1024,height:576})});const d=await r.json().catch(()=>null) as any;if(!r.ok||typeof d?.output!=="string")throw providerError("Pixazo image generation failed","image.pixazo");return d.output}
 async function upload(e:Env,name:string){const r=await fetch(INGEST+"/upload",{method:"POST",signal:AbortSignal.timeout(30000),headers:{"Accept":"application/json","Content-Type":"application/json","x-api-key":e.SHOTSTACK_API_KEY},body:JSON.stringify({filename:name.slice(0,160)})});const d=await r.json().catch(()=>null) as any;if(!r.ok||!d?.data?.id||!d?.data?.attributes?.url)throw providerError("Shotstack upload setup failed","audio.upload");return{source_id:d.data.id,upload_url:d.data.attributes.url}}
 async function source(e:Env,id:string){const r=await fetch(INGEST+"/sources/"+encodeURIComponent(id),{signal:AbortSignal.timeout(15000),headers:{"Accept":"application/json","x-api-key":e.SHOTSTACK_API_KEY}});const d=await r.json().catch(()=>null) as any;if(!r.ok||!d?.data?.attributes)throw providerError("Shotstack source lookup failed","audio.source");return d.data.attributes}
